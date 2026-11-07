@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+# tmux menu: which Claude account the quota badges pin, and whether they follow
+# the account running in the active pane. Bound in tmux.conf as
+#
+#   bind-key Q run-shell -b '~/.local/bin/tmux-claude-menu #{client_name}'
+#
+# -b because display-menu only returns once the menu closes.
+#
+# Lists the accounts that have reported (a state file in ~/.cache/claude-tmux),
+# so there is nothing to register. Choices land in @claude-quota-pin and
+# @claude-quota-auto, which tmux-claude-widget receives as arguments.
+
+set -uo pipefail
+
+DIR=~/.cache/claude-tmux
+client=${1:-}
+REFRESH='refresh-client -S'
+
+pin=$(tmux show-options -gqv @claude-quota-pin 2>/dev/null)
+auto=$(tmux show-options -gqv @claude-quota-auto 2>/dev/null)
+[ -n "$pin" ] || pin=personal
+
+# personal first (bare "quota"), then the rest alphabetically.
+accounts=()
+[ -s "$DIR/quota" ] && accounts+=(personal)
+while read -r name; do
+  [ -n "$name" ] && accounts+=("$name")
+done < <(
+  for f in "$DIR"/quota-*; do
+    [[ -s $f && $f != *.tmp ]] || continue
+    name=${f##*/quota-}
+    # Names go into a tmux command below; only the reporter's alphabet is safe.
+    [[ $name =~ ^[A-Za-z0-9_-]+$ ]] && echo "$name"
+  done | LC_ALL=C sort
+)
+
+items=()
+((${#accounts[@]})) || items+=('-No account has reported yet' '' '')
+for a in "${accounts[@]}"; do
+  label=$a; [ "$a" = "$pin" ] && label="* $a"
+  items+=("$label" '' "set -g @claude-quota-pin $a ; $REFRESH")
+done
+items+=('' 'Unpin' u "set -gu @claude-quota-pin ; $REFRESH")
+if [ "$auto" = off ]; then
+  items+=('Auto-detect: off' a "set -g @claude-quota-auto on ; $REFRESH")
+else
+  items+=('Auto-detect: on' a "set -g @claude-quota-auto off ; $REFRESH")
+fi
+
+tmux display-menu ${client:+-c "$client"} -T '#[align=centre]Claude quota' -x R -y S "${items[@]}"

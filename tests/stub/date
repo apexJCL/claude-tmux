@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Pins "now" for the scripts under test: `date +%s` answers $FAKE_NOW when set.
+if [[ ${1:-} == +%s && -n ${FAKE_NOW:-} ]]; then echo "$FAKE_NOW"; else exec /bin/date "$@"; fi

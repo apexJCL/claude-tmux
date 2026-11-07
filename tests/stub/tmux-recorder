@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Stands in for tmux in the menu tests (a real display-menu needs an attached
+# client). Each call appends its arguments to $TMUX_RECORD, one per line, then a
+# "--" line. `show-options ... <name>` answers from $TMUX_RECORD_OPTS/<name>.
+{ printf '%s\n' "$@"; echo --; } >> "$TMUX_RECORD"
+case ${1:-} in
+  show|show-options) name=${!#}; [ -f "$TMUX_RECORD_OPTS/$name" ] && cat "$TMUX_RECORD_OPTS/$name" ;;
+esac
+exit 0

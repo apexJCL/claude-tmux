@@ -1,0 +1,217 @@
+#!/usr/bin/env bash
+# tmux widget: Claude account quota usage, one badge per rate-limit window.
+#
+#   tmux-claude-widget session [sepbg [pane [pin [auto [pane_pid]]]]]  ->  <logo> 78% │ <clock> 02:13
+#   tmux-claude-widget week    [sepbg [pane [pin [auto [pane_pid]]]]]  ->  <logo> 41% │ <calendar> 09/21
+#
+# For an account without a 5h window (verified Ultra), both use the weekly window:
+#   session  ->  <logo> <calendar> 11/06 14:00    (gauge: week; its reset date-time)
+#   week     ->  <logo>     41%                    (same width, percentage centred)
+#
+# sepbg is the background the leading powerline separator butts against; it
+# defaults to tmux2k's clock segment, which the bottom-row badge sits after.
+# pane, pin, auto and pane_pid come from tmux.conf as #{pane_id} #{@claude-quota-pin}
+# #{@claude-quota-auto} #{pane_pid}: the account shown is the one Claude runs in the
+# active pane (unless auto is "off"), else the pinned one (default "personal"). A
+# pane's account comes from the file claude-tmux-status leaves in
+# ~/.cache/claude-tmux/panes; for a background session, which the pane only shows
+# through `claude attach <id>`, from the one it leaves in ~/.cache/claude-tmux/sessions.
+# An account other than the pin is drawn inverted, so a glance tells which it is.
+#
+# Per-account looks, from global tmux options:
+#   @claude-quota-scheme-<account>  orange|yellow|green|cyan|pink or "#base,#fill"
+#   @claude-quota-icon-<account>    glyph replacing the logo
+#
+# Otherwise session-agnostic by design -- it reads the shared state files that
+# Claude sessions write (see ~/.local/bin/claude-tmux-status), so it survives
+# sessions ending, panes closing and tmux restarts, and prints nothing at all when
+# the account shown has never reported. Emits its own powerline separator so the
+# segment disappears cleanly rather than leaving a stray arrow behind.
+#
+# The badge doubles as a gauge: its background fills left-to-right with the darker
+# shade in proportion to that window's usage. The split lands on a whole cell, so
+# every label character stays legible (a sub-cell block glyph would overwrite one).
+
+set -uo pipefail
+
+# Character-wise (not byte-wise) string ops for the multi-byte glyphs below.
+export LC_ALL=${LC_ALL:-en_US.UTF-8}
+
+variant=${1:-session}
+SEPBG=${2:-'#80FFEA'}
+pane=${3:-} pin=${4:-} auto=${5:-} pane_pid=${6:-}
+DIR=~/.cache/claude-tmux
+DARK='#0B0D0F'         # text on the pinned badge, background of the inverted one
+
+# Alarm colours win over any scheme: past these, a scheme colour stops reading as a warning.
+ALARM_BASE='#FF9580'; ALARM_FILL='#E8553A'
+
+# Generic AI sparkle (nf-md-creation), not nf-cod-claude: the latter needs Nerd
+# Fonts 3.5+, and Blink's font gallery still ships 3.4.
+LOGO='󰙴' CLOCK='󰥔' CALENDAR='󰃭' SEP=''
+
+case $variant in
+  session) icon=$CLOCK;    alarm=90 ;;
+  week)    icon=$CALENDAR; alarm=80 ;;
+  *) exit 0 ;;
+esac
+
+# A tmux too old to expand formats inside #() hands them over verbatim.
+[[ $pane == *'#{'* ]] && pane=
+[[ $pin == *'#{'* ]] && pin=
+[[ $auto == *'#{'* ]] && auto=
+[[ $pane_pid =~ ^[1-9][0-9]*$ ]] || pane_pid=
+# Account names become file and option names; same alphabet as the reporter.
+pin=${pin//[^A-Za-z0-9_-]/-}
+[ -n "$pin" ] || pin=personal
+
+now=$(date +%s)
+
+# load <account>: read its report; fails when there is none worth showing.
+load() {
+  local f=$DIR/quota
+  [ "$1" = personal ] || f=$DIR/quota-$1
+  [ -s "$f" ] || return 1
+  written=
+  read -r used5 resets5 used7 resets7 written < "$f" 2>/dev/null || return 1
+  [ -n "${written:-}" ] || return 1
+  # Drop a report older than a week; the account state is anyone's guess by then.
+  ((now - written <= 604800))
+}
+
+# attribution <file>: the account in a pane or session file, if its claude lives.
+attribution() {
+  local a p
+  read -r a p 2>/dev/null < "$1" &&
+    [[ $a =~ ^[A-Za-z0-9_-]+$ && $p =~ ^[1-9][0-9]*$ ]] &&
+    kill -0 "$p" 2>/dev/null && echo "$a"
+}
+
+# attached: the account of the background session the pane shows via
+# `claude attach <id>` (the pane process or a child of it). The id is a prefix of
+# the session id; an ambiguous prefix detects nothing.
+attached() {
+  local id f match=
+  [ -n "$pane_pid" ] || return 1
+  id=$(ps -A -o pid=,ppid=,args= 2>/dev/null | awk -v p="$pane_pid" '
+    ($1 == p || $2 == p) && match($0, /(^|\/| )claude attach [A-Za-z0-9_-]+/) {
+      n = split(substr($0, RSTART, RLENGTH), w, " "); print w[n]; exit }')
+  [ -n "$id" ] || return 1
+  for f in "$DIR/sessions/$id"*; do
+    [[ -f $f && $f != *.tmp ]] || continue
+    [ -z "$match" ] || return 1
+    match=$f
+  done
+  [ -n "$match" ] && attribution "$match"
+}
+
+# The active pane's Claude session wins over the pin, while that session lives.
+account=$pin style=pinned
+detected=
+if [ "$auto" != off ]; then
+  [[ $pane =~ ^%([0-9]+)$ ]] && detected=$(attribution "$DIR/panes/${BASH_REMATCH[1]}")
+  [ -n "$detected" ] || detected=$(attached)
+fi
+if [ -n "$detected" ] && load "$detected"; then
+  account=$detected
+  [ "$detected" = "$pin" ] || style=auto
+else
+  load "$pin" || exit 0
+fi
+
+# Per-account look. One tmux call; values with '#' or spaces come back quoted. No
+# server to ask (or no options) just means the defaults.
+scheme= logo=$LOGO
+while read -r key value; do
+  value=${value#\"}; value=${value%\"}
+  case $key in
+    "@claude-quota-scheme-$account") scheme=$value ;;
+    "@claude-quota-icon-$account")   [ -n "$value" ] && logo=$value ;;
+  esac
+done < <(tmux show-options -gq 2>/dev/null)
+
+# Dracula PRO hues, each with a hue-preserving darker shade for the filled portion.
+case $scheme in
+  yellow) base='#FFFF80'; fill='#C8C800' ;;
+  green)  base='#8AFF80'; fill='#3CC832' ;;
+  cyan)   base='#80FFEA'; fill='#20C8AC' ;;
+  pink)   base='#FF80BF'; fill='#E0408A' ;;
+  *)
+    if [[ $scheme =~ ^(#[0-9A-Fa-f]{6}),(#[0-9A-Fa-f]{6})$ ]]; then
+      base=${BASH_REMATCH[1]}; fill=${BASH_REMATCH[2]}
+    else
+      base='#FFCA80'; fill='#F08C00'   # orange, and anything unrecognised
+    fi ;;
+esac
+
+# A negative 5h figure means the account has no 5h window (verified Ultra accounts
+# have only the weekly one). Both badges then switch to alternate layouts that share
+# the weekly window: `session` gauges the week and spells out its reset as
+# `MM/DD HH:MM`, and `week` drops the date and centres its percentage.
+no5h=
+[[ $used5 =~ ^[0-9]+$ ]] || no5h=1
+if [ "$variant" = session ] && [ -z "$no5h" ]; then
+  used=$used5; resets=$resets5
+else
+  used=$used7; resets=$resets7; alarm=80
+fi
+[[ $used =~ ^[0-9]+$ ]] || exit 0
+
+# A window that has rolled over since the last report is empty again -- this is why
+# no polling daemon is needed to keep the numbers honest. Its next reset isn't known
+# until a session reports again, hence the placeholder.
+if ((resets <= 0 || now >= resets)); then
+  ((resets > 0)) && used=0
+  if [ "$variant" = session ]; then
+    [ -n "$no5h" ] && when='--/-- --:--' || when='--:--'
+  else
+    when='--/--'
+  fi
+elif [ "$variant" = session ] && [ -n "$no5h" ]; then
+  when=$(date -r "$resets" '+%m/%d %H:%M')
+elif [ "$variant" = session ]; then
+  left=$((resets - now))
+  printf -v when '%02d:%02d' $((left / 3600)) $((left % 3600 / 60))
+else
+  when=$(date -r "$resets" +%m/%d)
+fi
+
+if ((used >= alarm)); then base=$ALARM_BASE; fill=$ALARM_FILL; fi
+
+# Inverted for an auto-detected account: near-black, the gauge a faint shadow of
+# the fill (each channel / 4), and the fill colour itself carrying the text.
+if [ "$style" = auto ]; then
+  fg=$fill
+  h=${fill#\#}
+  printf -v fill '#%02X%02X%02X' $((16#${h:0:2} / 4)) $((16#${h:2:2} / 4)) $((16#${h:4:2} / 4))
+  base=$DARK
+else
+  fg=$DARK
+fi
+
+label=" $logo ${used}% │ $icon $when "
+if [ -n "$no5h" ] && [ "$variant" = session ]; then
+  label=" $logo $CALENDAR $when "
+elif [ -n "$no5h" ]; then
+  # Same width as the regular badge, so the bar doesn't shift; the percentage is
+  # centred on the badge, with the logo kept at its left edge.
+  full=${#label} pct="${used}%" head=" $logo "
+  start=$(( (full - ${#pct}) / 2 ))
+  ((start < ${#head})) && start=${#head}
+  label=$head
+  while ((${#label} < start)); do label+=' '; done
+  label+=$pct
+  while ((${#label} < full)); do label+=' '; done
+fi
+width=${#label}
+# Round to the nearest whole cell.
+cells=$(( (used * width + 50) / 100 ))
+((cells < 0)) && cells=0
+((cells > width)) && cells=$width
+
+# The separator takes the colour of whatever run it butts against.
+if ((cells > 0)); then lead=$fill; else lead=$base; fi
+printf '#[fg=%s,bg=%s]%s' "$lead" "$SEPBG" "$SEP"
+((cells > 0))     && printf '#[fg=%s,bg=%s]%s' "$fg" "$fill" "${label:0:cells}"
+((cells < width)) && printf '#[fg=%s,bg=%s]%s' "$fg" "$base" "${label:cells}"
+printf '#[norange default]'

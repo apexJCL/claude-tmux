@@ -1,0 +1,40 @@
+schema: spec-driven
+
+context: |
+  Bash scripts for a tmux status badge showing Claude Code subscription quota.
+  bin/claude-tmux-status (Claude Code statusLine command, writes ~/.cache/claude-tmux/quota*),
+  bin/tmux-claude-widget (renders the badge), bin/tmux-two-row-status (two-row tmux layout).
+  Dependencies: bash 4.2+, jq, tmux, Nerd Font glyphs. Name glyphs by codepoint in specs and tests.
+  Tests: tests/run.sh, one check per spec scenario; every change adds or updates checks.
+  Commits: type(scope): description.
+
+# Project context (optional)
+# This is shown to AI when creating artifacts.
+# Add your tech stack, conventions, style guides, domain knowledge, etc.
+# Example:
+#   context: |
+#     Tech stack: TypeScript, React, Node.js
+#     We use conventional commits
+#     Domain: e-commerce platform
+
+# Per-artifact rules (optional)
+# Add custom rules for specific artifacts.
+# Example:
+#   rules:
+#     proposal:
+#       - Keep proposals under 500 words
+#       - Always include a "Non-goals" section
+#     tasks:
+#       - Break tasks into chunks of max 2 hours
+
+# Per-operation guidance (optional)
+# Add advisory guidance for how apply and archive work should be conducted.
+# This is separate from artifact rules above.
+# Example:
+#   operations:
+#     apply:
+#       guidance:
+#         - Keep test summaries concise
+#     archive:
+#       guidance:
+#         - Summarize the archive outcome before finishing

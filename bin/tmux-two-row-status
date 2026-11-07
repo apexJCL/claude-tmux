@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# Split the status line into two rows:
+#   row 0 (upper) -- the window list, plus @status-top-right right-aligned (the
+#                    list gets whatever width that leaves)
+#   row 1 (lower) -- status-left + status-right, i.e. tmux2k's segments
+#
+# Rather than hardcoding a copy of tmux's status-format, this slices the built-in
+# default, so it stays in step with whatever tmux ships. The pristine default is
+# stashed in @status-format-default on first run, which makes re-running (prefix+r,
+# config reload) idempotent.
+
+set -uo pipefail
+
+saved=$(tmux show -gv '@status-format-default' 2>/dev/null || true)
+if [ -z "$saved" ]; then
+  saved=$(tmux show -gv 'status-format[0]' 2>/dev/null || true)
+  [ -n "$saved" ] || exit 0
+  tmux set -g '@status-format-default' "$saved"
+fi
+
+mid_anchor='#[list=on align='
+right_anchor='#[nolist align=right range=right '
+
+case $saved in
+  *"$mid_anchor"*"$right_anchor"*) ;;
+  *) exit 0 ;;                                     # unfamiliar default: leave it alone
+esac
+
+left=${saved%%"$mid_anchor"*}                      # status-left segment
+rest=${saved#"$left"}
+windows=${rest%%"$right_anchor"*}                  # window list
+right=${rest#"$windows"}                           # status-right segment
+
+tmux set -g status 2
+tmux set -g 'status-format[0]' "${windows}#[nolist align=right]#[push-default]#{E:@status-top-right}#[pop-default]#[norange default]"
+tmux set -g 'status-format[1]' "${left}${right}"
