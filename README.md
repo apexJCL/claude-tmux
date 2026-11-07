@@ -2,6 +2,18 @@
 
 A tmux status badge for Claude Code subscription quota: one badge for the 5-hour window (usage and time left), one for the 7-day window (usage and reset date). Each badge is also a gauge, filled left to right in proportion to usage.
 
+![The two badges in a tmux2k bar: the 5-hour window top right, the weekly one at the end of the bottom row](docs/img/bar.png)
+
+## States
+
+![Gauge levels, alarm colours, a window that rolled over, and an account with only the weekly window](docs/img/states.png)
+
+- **Gauge**: the darker shade fills the badge in proportion to usage, rounded to whole cells.
+- **Alarm**: at `≥ 90%` (session) or `≥ 80%` (week) the badge turns red, whatever the scheme.
+- **Rolled over**: a window whose reset time has passed since the last report reads `0%`, with `--:--` / `--/--` until a session reports the next reset.
+- **Weekly only**: accounts without a 5-hour window (verified Ultra) gauge the week on both badges: the session badge spells out the reset date and time, the week badge centres its percentage.
+- **Nothing reported**: no badge at all.
+
 ## How it works
 
 | Piece | Role | Spec |
@@ -33,6 +45,10 @@ The badges show one account at a time:
 | `@claude-quota-icon-<account>` | a glyph replacing the logo | U+F0674 |
 
 Schemes and icons tell accounts apart; the style tells whether the account is pinned or detected. Alarm colours (`≥ 90%` session, `≥ 80%` week) override any scheme.
+
+![Every colour scheme, pinned and detected (inverted), a custom icon, and the alarm when detected](docs/img/accounts.png)
+
+![The prefix + Q account menu, and the line claude-tmux-status prints inside Claude Code](docs/img/menu.png)
 
 ## Install
 
@@ -72,6 +88,10 @@ tests/run.sh
 ```
 
 Runs each spec scenario against `bin/` in a throwaway `$HOME` and an isolated tmux server. `tests/stub/date` pins "now".
+
+## Screenshots
+
+`docs/screenshots/render.sh` regenerates `docs/img/`. The badges are the real `tmux-claude-widget` output for mocked state files and a pinned clock; the bar around them and the menu are mock-ups. Needs Google Chrome, ImageMagick, python3 and a Nerd Font Mono.
 
 ## Changes
 
